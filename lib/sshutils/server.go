@@ -29,14 +29,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/gravitational/teleport"
 	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/limiter"
 	"github.com/gravitational/teleport/lib/utils"
 
 	"github.com/gravitational/trace"
+
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/crypto/ssh"
 )
 
 // Server is a generic implementation of an SSH server. All Teleport
@@ -463,10 +465,33 @@ func checkArguments(a utils.NetAddr, h NewChanHandler, hostSigners []ssh.Signer,
 		if s == nil {
 			return trace.BadParameter("host signer can not be nil")
 		}
+		err := validateHostSigner(s)
+		if err != nil {
+			return trace.Wrap(err)
+		}
 	}
 	if ah.PublicKey == nil && ah.Password == nil && ah.NoClient == false {
 		return trace.BadParameter("need at least one auth method")
 	}
+	return nil
+}
+
+// validateHostSigner make sure the signer is a valid certificate.
+func validateHostSigner(signer ssh.Signer) error {
+	cert, ok := signer.PublicKey().(*ssh.Certificate)
+	if !ok {
+		return trace.BadParameter("only host certificates supported")
+	}
+	if len(cert.ValidPrincipals) == 0 {
+		return trace.BadParameter("at least one valid principal is required in host certificate")
+	}
+
+	certChecker := utils.CertChecker{}
+	err := certChecker.CheckCert(cert.ValidPrincipals[0], cert)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
 	return nil
 }
 
